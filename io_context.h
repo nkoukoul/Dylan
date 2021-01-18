@@ -25,6 +25,26 @@ struct client_context
     char *data_;
 };
 
+struct http_request
+{
+    char *request_type_;
+    char *url_;
+    char *protocol_;
+    char * headers_[100];
+};
+
+unsigned long
+hash(unsigned char *str)
+{
+    unsigned long hash = 5381;
+    int c;
+
+    while (c = *str++)
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+
+    return hash;
+}
+
 void non_block_socket(int sd)
 {
     /* set O_NONBLOCK on fd */
@@ -42,22 +62,97 @@ void non_block_socket(int sd)
 
 void http_request_parse(struct strand *sd, struct client_context *c_ctx)
 {
-    char request_type[4], url[20], protocol[10], *line, *line_end, *line_start;
-    char nl_del[] = "\r\n\r\n";
-    char sp_del[] = " ";
+
+    struct http_request *http_req = (struct http_request *)malloc(sizeof(struct http_request));
+    char *token, *token_start, *token_end, *line, *line_end, *line_start;
     //first line
     line_start = c_ctx->data_;
-    line_end = strstr(line_start, "\r\n\r\n");
+    line_end = strstr(line_start, "\r\n");
     /* walk through other tokens */
+    int line_num = 1;
     while (line_end != NULL)
     {
-        int length = line_end - line_start + 1;
+        int token_length = 0;
+        int length = line_end - line_start + 2;
         line = (char *)malloc(length * sizeof(char));
-        memcpy(line, line_start, length);
-        line[length] = '\0';
-        printf(" %s\n", line);
+        memcpy(line, line_start, length - 2);
+        line[length - 2] = '\n';
+        line[length - 1] = '\0';
+        printf(" %s", line);
+        if (line_num == 1)
+        {
+            int token_num = 1;
+            token_start = line;
+            token_end = strstr(token_start, " ");
+            while (token_end != NULL)
+            {
+                token_length = token_end - token_start + 1;
+                switch (token_num)
+                {
+                case 1:
+                    http_req->request_type_ = (char *)malloc(token_length * sizeof(char));
+                    memcpy(http_req->request_type_, token_start, token_length - 1);
+                    http_req->request_type_[token_length - 1] = '\0';
+                    printf(" %s\n", http_req->request_type_);
+                    token_start = token_end + 1;
+                    token_end = strstr(token_start, " ");
+                    break;
+                case 2:
+                    http_req->url_ = (char *)malloc(token_length * sizeof(char));
+                    memcpy(http_req->url_, token_start, token_length - 1);
+                    http_req->url_[token_length - 1] = '\0';
+                    printf(" %s\n", http_req->url_);
+                    token_start = token_end + 1;
+                    token_end = strstr(token_start, "\n");
+                    break;
+                case 3:
+                    http_req->protocol_ = (char *)malloc(token_length * sizeof(char));
+                    memcpy(http_req->protocol_, token_start, token_length - 1);
+                    http_req->protocol_[token_length - 1] = '\0';
+                    printf(" %s\n", http_req->protocol_);
+                }
+                token_num++;
+                if (token_num == 4)
+                {
+                    break;
+                }
+            }
+        }
+        else
+        {
+            token_start = line;
+            token_end = strstr(token_start, " ");
+            if (token_end)
+            {//key
+                int token_length = token_end - token_start + 1;
+                token = (char *)malloc(token_length * sizeof(char));
+                memcpy(token, token_start, token_length -1);
+                token[token_length - 1] = '\0';
+                //printf("key %s\n", token);
+                int index = hash((unsigned char *)token)%100;                
+                free(token);
+                token_start = token_end + 1;
+                token_end = strstr(token_start, "\n");
+                if (token_end)
+                {//value
+                    token_length = token_end - token_start + 1;
+                    http_req->headers_[index] = (char *)malloc(token_length * sizeof(char));
+                    memcpy(http_req->headers_[index], token_start, token_length - 1);
+                    http_req->headers_[index][token_length - 1] = '\0';
+                    //printf("value %s\n", token);
+                }
+            }
+        }
+        line_num++;
         line_start = line_end + 1;
-        line_end = strstr(line_start, "\r\n\r\n");
+        line_end = strstr(line_start, "\r\n");
+    }
+    for (int i = 0; i < 100; i++)
+    {
+        if (http_req->headers_[i])
+        {
+            printf("value: %s\n", http_req->headers_[i]);
+        }
     }
 }
 

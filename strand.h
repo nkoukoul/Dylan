@@ -6,23 +6,26 @@
 #include <stdio.h>
 
 struct strand;
+struct client_context;
 
 struct job
 {
     struct job *next_;
-    void (*func_ptr_)(int, struct strand *);
+    void (*func_ptr_)(struct strand *, struct client_context *);
+    struct client_context *c_ctx_;
     int job_id_;
 };
 
 struct strand
 {
-    struct job *head_;
+    struct job *cursor_;
     pthread_mutex_t strand_lock_;
     int size_;
     int job_id_;
+    struct io_context *ioc_;
 };
 
-pthread_mutex_t initialize_lock(struct strand * sd)
+pthread_mutex_t initialize_lock(struct strand *sd)
 {
     pthread_mutex_t mut;
     pthread_mutexattr_t attr;
@@ -40,29 +43,47 @@ pthread_mutex_t initialize_lock(struct strand * sd)
     return mut;
 }
 
-struct strand *create_strand()
+struct strand *create_strand(struct io_context *ioc)
 {
     struct strand *sd;
     sd = (struct strand *)malloc(sizeof(struct strand));
-    struct job *head; /*empty event*/
-    head = (struct job *)malloc(sizeof(struct job));
-    head->next_ = NULL;
-    head->job_id_ = -1;
-    sd->head_ = head;
+    sd->cursor_ = NULL;
     sd->size_ = 0;
     sd->job_id_ = 0;
+    sd->ioc_ = ioc;
     sd->strand_lock_ = initialize_lock(sd);
     return sd;
 }
 
-void add_job(struct strand *sd, void (*func) (int, struct strand *))
+struct job *front(struct strand *sd)
+{
+    return sd->cursor_->next_;
+}
+
+struct job *back(struct strand *sd)
+{
+    return sd->cursor_;
+}
+
+void add_job(struct strand *sd, struct client_context *c_ctx, void (*func)(struct strand *, struct client_context *))
 {
     struct job *new_job;
     new_job = (struct job *)malloc(sizeof(struct job));
-    new_job->next_ = sd->head_->next_;
     new_job->func_ptr_ = func;
+    new_job->c_ctx_ = c_ctx;
     pthread_mutex_lock(&sd->strand_lock_);
-    sd->head_->next_ = new_job;
+    if (sd->cursor_) //queue not empty
+    {
+        new_job->next_ = sd->cursor_->next_;
+        sd->cursor_->next_ = new_job;
+    }
+    else //queue empty
+    {
+        new_job->next_ = new_job;
+        sd->cursor_ = new_job;
+    }
+    //advance cursor
+    sd->cursor_ = sd->cursor_->next_;
     sd->size_++;
     sd->job_id_++;
     new_job->job_id_ = sd->job_id_;
@@ -72,13 +93,20 @@ void add_job(struct strand *sd, void (*func) (int, struct strand *))
 struct job *get_job(struct strand *sd)
 {
     pthread_mutex_lock(&sd->strand_lock_);
-    if (!sd->head_->next_)
+    if (!sd->size_)
     {
         pthread_mutex_unlock(&sd->strand_lock_);
         return NULL;
     }
-    struct job *first_job = sd->head_->next_;
-    sd->head_->next_ = first_job->next_;
+    struct job *first_job = front(sd);
+    if (first_job == sd->cursor_)
+    {
+        sd->cursor_ = NULL;
+    }
+    else
+    {
+        sd->cursor_->next_ = first_job->next_;
+    }
     sd->size_--;
     pthread_mutex_unlock(&sd->strand_lock_);
     return first_job;

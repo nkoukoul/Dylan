@@ -16,13 +16,19 @@ struct job
     int job_id_;
 };
 
+void clear_job(struct job* jb)
+{
+    jb->next_ = NULL;
+    jb->c_ctx_ = NULL;//client context will be free when request is complete
+}
+
 struct strand
 {
     struct job *cursor_;
     pthread_mutex_t strand_lock_;
     int size_;
     int job_id_;
-    struct io_context *ioc_;
+    struct server_context *ioc_;
 };
 
 pthread_mutex_t initialize_lock(struct strand *sd)
@@ -43,7 +49,7 @@ pthread_mutex_t initialize_lock(struct strand *sd)
     return mut;
 }
 
-struct strand *create_strand(struct io_context *ioc)
+struct strand *create_strand(struct server_context *ioc)
 {
     struct strand *sd;
     sd = (struct strand *)malloc(sizeof(struct strand));

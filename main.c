@@ -26,6 +26,7 @@ void *executor(void *thread_info)
         {
             //printf("hello from thread %d ", thread_id);
             jb->func_ptr_(tf->sd_, jb->c_ctx_);
+            clear_job(jb);
             free(jb);
         }
         else
@@ -41,7 +42,7 @@ int main(int argc, char *argv[])
     char *ipaddr = argv[1];
     int port = (int)strtol(argv[2], &ptr, 10);
     int thread_number = (int)strtol(argv[3], &ptr, 10);
-    struct io_context *ioc = initialize_io_context(ipaddr, port);
+    struct server_context *ioc = initialize_io_context(ipaddr, port);
     struct strand *sd = create_strand(ioc);
     pthread_t *thread_arr = (pthread_t *)malloc(thread_number * sizeof(pthread_t));
     for (int i = 0; i < thread_number; i++)

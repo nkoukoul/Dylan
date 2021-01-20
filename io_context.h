@@ -11,6 +11,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include "strand.h"
+#include "utils.h"
 
 #define MAXBUF 1024
 
@@ -21,7 +22,7 @@ struct http_request;
 void clear_http_request(struct http_request * http_req);
 void clear_http_response(struct http_response * http_res);
 
-struct io_context
+struct server_context
 {
     int server_sock_;
 };
@@ -37,8 +38,13 @@ struct client_context
 void clear_client_context(struct client_context * c_ctx)
 {
     free(c_ctx->data_);
+    c_ctx->data_ = NULL;
     clear_http_request(c_ctx->http_req_);
+    free(c_ctx->http_req_);
+    c_ctx->http_req_ = NULL;
     clear_http_response(c_ctx->http_res_);
+    free(c_ctx->http_res_);
+    c_ctx->http_res_ = NULL;
     free(c_ctx);
 }
 
@@ -54,14 +60,18 @@ struct http_request
 void clear_http_request(struct http_request * http_req)
 {
     free(http_req->request_type_);
+    http_req->request_type_ = NULL;
     free(http_req->url_);
+    http_req->url_ = NULL;
     free(http_req->protocol_);
+    http_req->protocol_ = NULL;
     for (int i = 0; i < 100; i++)
     {
         free(http_req->header_values[i]);
+        http_req->header_values[i] = NULL;
         free(http_req->header_keys[i]);
+        http_req->header_keys[i] = NULL;
     }
-    free(http_req);
 }
 
 struct http_response
@@ -73,18 +83,7 @@ struct http_response
 void clear_http_response(struct http_response * http_res)
 {
     free(http_res->response_);
-    free(http_res);
-}
-
-unsigned long hash(unsigned char *str)
-{
-    unsigned long hash = 5381;
-    int c;
-
-    while (c = *str++)
-        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-
-    return hash;
+    http_res->response_ = NULL;
 }
 
 void non_block_socket(int sd)
@@ -102,18 +101,6 @@ void non_block_socket(int sd)
     }
 }
 
-char * get_daytime(){
-  time_t rawtime;
-  struct tm * timeinfo;
-  char *buffer = (char *)malloc(80 * sizeof(char));
-  
-  time (&rawtime);
-  timeinfo = localtime(&rawtime);
-  
-  strftime(buffer,80,"%a %b %d %H:%M:%S %Y",timeinfo);
-  return buffer;
-}
-
 void http_write(struct strand *sd, struct client_context *c_ctx)
 {
     write(c_ctx->client_socket_, c_ctx->http_res_->response_, c_ctx->http_res_->res_size_);
@@ -127,12 +114,12 @@ void http_create_response(struct strand *sd, struct client_context *c_ctx)
     char *response;
     response = (char *)malloc(1024 * sizeof(char));
     int cx = 0, tcx = 0;
-    tcx += snprintf ( response + tcx, 1024 - tcx, "HTTP/1.1 200 OK\r\n");
+    tcx += snprintf (response + tcx, 1024 - tcx, "HTTP/1.1 200 OK\r\n");
     char * daytime = get_daytime();
-    tcx += snprintf ( response + tcx, 1024 - tcx, "Date %s\r\n",  daytime);
+    tcx += snprintf (response + tcx, 1024 - tcx, "Date %s\r\n",  daytime);
     free(daytime);
-    tcx += snprintf ( response + tcx, 1024 - tcx, "Connection: close\r\n");
-    tcx += snprintf ( response + tcx, 1024 - tcx, "\r\n");
+    tcx += snprintf (response + tcx, 1024 - tcx, "Connection: close\r\n");
+    tcx += snprintf (response + tcx, 1024 - tcx, "\r\n");
     c_ctx->http_res_ = (struct http_response *)calloc(1, sizeof(struct http_response));
     c_ctx->http_res_->response_ = response;
     c_ctx->http_res_->res_size_ = tcx;
@@ -172,7 +159,7 @@ void http_parse_request(struct strand *sd, struct client_context *c_ctx)
                     c_ctx->http_req_->request_type_ = (char *)malloc(token_length * sizeof(char));
                     memcpy(c_ctx->http_req_->request_type_, token_start, token_length - 1);
                     c_ctx->http_req_->request_type_[token_length - 1] = '\0';
-                    printf("%s\n", c_ctx->http_req_->request_type_);
+                    //printf("%s\n", c_ctx->http_req_->request_type_);
                     token_start = token_end + 1;
                     token_end = strstr(token_start, " ");
                     break;
@@ -180,7 +167,7 @@ void http_parse_request(struct strand *sd, struct client_context *c_ctx)
                     c_ctx->http_req_->url_ = (char *)malloc(token_length * sizeof(char));
                     memcpy(c_ctx->http_req_->url_, token_start, token_length - 1);
                     c_ctx->http_req_->url_[token_length - 1] = '\0';
-                    printf("%s\n", c_ctx->http_req_->url_);
+                    //printf("%s\n", c_ctx->http_req_->url_);
                     token_start = token_end + 1;
                     token_end = strstr(token_start, "\n");
                     break;
@@ -188,7 +175,7 @@ void http_parse_request(struct strand *sd, struct client_context *c_ctx)
                     c_ctx->http_req_->protocol_ = (char *)malloc(token_length * sizeof(char));
                     memcpy(c_ctx->http_req_->protocol_, token_start, token_length - 1);
                     c_ctx->http_req_->protocol_[token_length - 1] = '\0';
-                    printf("%s\n", c_ctx->http_req_->protocol_);
+                    //printf("%s\n", c_ctx->http_req_->protocol_);
                 }
                 token_num++;
                 if (token_num == 4)
@@ -230,20 +217,11 @@ void http_parse_request(struct strand *sd, struct client_context *c_ctx)
         line_start = line_end + 2; //skip two characters
         line_end = strstr(line_start, "\r\n");
     }
-    for (int i = 0; i < 100; i++)
-    {
-        if (c_ctx->http_req_->header_keys[i] && c_ctx->http_req_->header_values[i])
-        {
-            printf("key: %s, value: %s\n",
-                   c_ctx->http_req_->header_keys[i],
-                   c_ctx->http_req_->header_values[i]);
-        }
-    }
     void (*func_ptr)(struct strand *, struct client_context *) = http_create_response;
     add_job(sd, c_ctx, func_ptr);
 }
 
-void do_read(struct strand *sd, struct client_context *c_ctx)
+void http_read(struct strand *sd, struct client_context *c_ctx)
 {
     char inbuffer[MAXBUF], *p = inbuffer;
 
@@ -254,7 +232,7 @@ void do_read(struct strand *sd, struct client_context *c_ctx)
         if (errno == EAGAIN || errno == EWOULDBLOCK)
         {
             //client read block try again
-            void (*func_ptr)(struct strand *, struct client_context *) = do_read;
+            void (*func_ptr)(struct strand *, struct client_context *) = http_read;
             add_job(sd, c_ctx, func_ptr);
             return;
         }
@@ -262,13 +240,14 @@ void do_read(struct strand *sd, struct client_context *c_ctx)
         {
             //client closed connection
             close(c_ctx->client_socket_);
+            clear_client_context(c_ctx);
             return;
         }
     }
     else
     {
-        printf("read bytes %d\n", bytes_read);
-        printf("%s", inbuffer);
+        //printf("read bytes %d\n", bytes_read);
+        //printf("%s", inbuffer);
         c_ctx->data_ = (char *)malloc(bytes_read * sizeof(char));
         memcpy(c_ctx->data_, inbuffer, bytes_read);
         void (*func_ptr)(struct strand *, struct client_context *) = http_parse_request;
@@ -287,8 +266,8 @@ void handle_connections(struct strand *sd, struct client_context *c_ctx)
     {
         if (errno == EAGAIN || errno == EWOULDBLOCK)
         {
+            //no incoming connection for non-blocking sockets try again
             ;
-            ; //no incoming connection for non-blocking sockets
         }
         else
         {
@@ -302,14 +281,14 @@ void handle_connections(struct strand *sd, struct client_context *c_ctx)
         c_ctx = (struct client_context *)malloc(sizeof(struct client_context));
         c_ctx->client_socket_ = client_socket;
         c_ctx->data_ = NULL;
-        void (*func_ptr)(struct strand *, struct client_context *) = do_read;
+        void (*func_ptr)(struct strand *, struct client_context *) = http_read;
         add_job(sd, c_ctx, func_ptr);
     }
     void (*func_ptr)(struct strand *, struct client_context *) = handle_connections;
     add_job(sd, NULL, func_ptr);
 }
 
-void http_handler(struct io_context *ioc, char *ipaddr, int port)
+void http_handler(struct server_context *ioc, char *ipaddr, int port)
 {
     struct sockaddr_in server;
 
@@ -328,9 +307,9 @@ void http_handler(struct io_context *ioc, char *ipaddr, int port)
     printf("server accepting connections on %s : %d\n", ipaddr, port);
 }
 
-struct io_context *initialize_io_context(char *ipaddr, int port)
+struct server_context *initialize_io_context(char *ipaddr, int port)
 {
-    struct io_context *ioc = (struct io_context *)malloc(sizeof(struct io_context));
+    struct server_context *ioc = (struct server_context *)malloc(sizeof(struct server_context));
     http_handler(ioc, ipaddr, port);
     return ioc;
 }

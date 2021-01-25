@@ -20,6 +20,7 @@ void clear_job(struct job* jb)
 {
     jb->next_ = NULL;
     jb->c_ctx_ = NULL;//client context will be free when request is complete
+    free(jb);
 }
 
 struct strand
@@ -31,7 +32,7 @@ struct strand
     struct server_context *ioc_;
 };
 
-pthread_mutex_t initialize_lock(struct strand *sd)
+pthread_mutex_t initialize_lock()
 {
     pthread_mutex_t mut;
     pthread_mutexattr_t attr;
@@ -57,7 +58,7 @@ struct strand *create_strand(struct server_context *ioc)
     sd->size_ = 0;
     sd->job_id_ = 0;
     sd->ioc_ = ioc;
-    sd->strand_lock_ = initialize_lock(sd);
+    sd->strand_lock_ = initialize_lock();
     return sd;
 }
 
@@ -74,7 +75,7 @@ struct job *back(struct strand *sd)
 void add_job(struct strand *sd, struct client_context *c_ctx, void (*func)(struct strand *, struct client_context *))
 {
     struct job *new_job;
-    new_job = (struct job *)malloc(sizeof(struct job));
+    new_job = (struct job *)calloc(1, sizeof(struct job));
     new_job->func_ptr_ = func;
     new_job->c_ctx_ = c_ctx;
     pthread_mutex_lock(&sd->strand_lock_);

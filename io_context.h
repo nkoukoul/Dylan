@@ -38,13 +38,8 @@ struct client_context
 void clear_client_context(struct client_context * c_ctx)
 {
     free(c_ctx->data_);
-    c_ctx->data_ = NULL;
     clear_http_request(c_ctx->http_req_);
-    free(c_ctx->http_req_);
-    c_ctx->http_req_ = NULL;
     clear_http_response(c_ctx->http_res_);
-    free(c_ctx->http_res_);
-    c_ctx->http_res_ = NULL;
     free(c_ctx);
 }
 
@@ -60,18 +55,14 @@ struct http_request
 void clear_http_request(struct http_request * http_req)
 {
     free(http_req->request_type_);
-    http_req->request_type_ = NULL;
     free(http_req->url_);
-    http_req->url_ = NULL;
     free(http_req->protocol_);
-    http_req->protocol_ = NULL;
     for (int i = 0; i < 100; i++)
     {
         free(http_req->header_values[i]);
-        http_req->header_values[i] = NULL;
         free(http_req->header_keys[i]);
-        http_req->header_keys[i] = NULL;
     }
+    free(http_req);
 }
 
 struct http_response
@@ -83,7 +74,7 @@ struct http_response
 void clear_http_response(struct http_response * http_res)
 {
     free(http_res->response_);
-    http_res->response_ = NULL;
+    free(http_res);
 }
 
 void non_block_socket(int sd)
@@ -112,7 +103,7 @@ void http_write(struct strand *sd, struct client_context *c_ctx)
 void http_create_response(struct strand *sd, struct client_context *c_ctx)
 {
     char *response;
-    response = (char *)malloc(1024 * sizeof(char));
+    response = (char *)calloc(1024, sizeof(char));
     int cx = 0, tcx = 0;
     tcx += snprintf (response + tcx, 1024 - tcx, "HTTP/1.1 200 OK\r\n");
     char * daytime = get_daytime();
@@ -278,9 +269,8 @@ void handle_connections(struct strand *sd, struct client_context *c_ctx)
     else
     {
         non_block_socket(client_socket);
-        c_ctx = (struct client_context *)malloc(sizeof(struct client_context));
+        c_ctx = (struct client_context *)calloc(1, sizeof(struct client_context));
         c_ctx->client_socket_ = client_socket;
-        c_ctx->data_ = NULL;
         void (*func_ptr)(struct strand *, struct client_context *) = http_read;
         add_job(sd, c_ctx, func_ptr);
     }
@@ -309,7 +299,7 @@ void http_handler(struct server_context *ioc, char *ipaddr, int port)
 
 struct server_context *initialize_io_context(char *ipaddr, int port)
 {
-    struct server_context *ioc = (struct server_context *)malloc(sizeof(struct server_context));
+    struct server_context *ioc = (struct server_context *)calloc(1, sizeof(struct server_context));
     http_handler(ioc, ipaddr, port);
     return ioc;
 }

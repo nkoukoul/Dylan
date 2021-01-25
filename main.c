@@ -27,7 +27,6 @@ void *executor(void *thread_info)
             //printf("hello from thread %d ", thread_id);
             jb->func_ptr_(tf->sd_, jb->c_ctx_);
             clear_job(jb);
-            free(jb);
         }
         else
         {

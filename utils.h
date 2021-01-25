@@ -27,21 +27,20 @@ char * get_daytime(){
   return buffer;
 }
 
-char * get_data_from_file(char * filename, size_t * file_size)
+void get_data_from_file(char * filename, char ** data, size_t * file_size)
 {
   int fd = open(filename, O_RDONLY);
   if (fd < 0)
   {
     *file_size = 0;
     //printf("unable to open %s\n", filename);
-    return NULL;
+    return;
   }
   *file_size = lseek(fd, 0, SEEK_END);
-  char * data = (char*)malloc((*file_size) * sizeof(char));
-  pread(fd, data, *file_size, 0);
+  *data = (char*)malloc((*file_size) * sizeof(char));
+  pread(fd, *data, *file_size, 0);
   close(fd);
   //printf("file to open %s with size %lu\n", filename, *file_size);
-  return data;
 }
 
 #endif // UTILS_H

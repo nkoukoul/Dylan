@@ -41,7 +41,9 @@ int main(int argc, char *argv[])
     char *ipaddr = argv[1];
     int port = (int)strtol(argv[2], &ptr, 10);
     int thread_number = (int)strtol(argv[3], &ptr, 10);
-    struct server_context *ioc = initialize_io_context(ipaddr, port);
+    struct route_table *rt = create_route_table();
+    insert_route(rt, "/file", "GET");
+    struct server_context *ioc = initialize_io_context(ipaddr, port, rt);
     struct strand *sd = create_strand(ioc);
     pthread_t *thread_arr = (pthread_t *)malloc(thread_number * sizeof(pthread_t));
     for (int i = 0; i < thread_number; i++)

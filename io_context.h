@@ -22,9 +22,47 @@ struct http_request;
 void clear_http_request(struct http_request * http_req);
 void clear_http_response(struct http_response * http_res);
 
+struct route_table
+{
+    int route_urls[100][2]; //only get and post for time being
+};
+
+struct route_table * create_route_table()
+{
+    struct route_table *rt = (struct route_table *) calloc(1, sizeof(struct route_table));
+    return rt;
+}
+
+void insert_route(struct route_table * rt, char * url, char * method)
+{
+    size_t index = hash((unsigned char *)url) % 100;
+    if (strcmp("GET", method) == 0)
+    {
+        rt->route_urls[index][0] = 1;
+    }
+    else if (strcmp("POST", method) == 0){
+        rt->route_urls[index][1] = 1;
+    }
+}
+
+int check_if_route_exists(struct route_table * rt, char * url, char * method)
+{
+    size_t index = hash((unsigned char *)url) % 100;
+    if (strcmp("GET", method) == 0 && rt->route_urls[index][0])
+    {
+         return 1;
+    }
+    else if (strcmp("POST", method) == 0 && rt->route_urls[index][1])
+    {
+         return 1;
+    }
+    return 0;
+}
+
 struct server_context
 {
     int server_sock_;
+    struct route_table *rt_;
 };
 
 struct client_context
@@ -103,21 +141,35 @@ void http_write(struct strand *sd, struct client_context *c_ctx)
 
 void http_create_response(struct strand *sd, struct client_context *c_ctx)
 {
+    size_t file_size = 0;
+    char * file_data = NULL;
+    char status[50];
+    memset(status, 0, 50);
     char *routename_start = c_ctx->http_req_->url_ + 1; // skip initial /
     char *routename_end = strstr(routename_start, "/");
     size_t routename_length = routename_end - routename_start +2;
-    char *filename_start = routename_end + 1;
-    size_t filename_legth = c_ctx->http_req_->url_length_ - routename_length;
-    char *filename = (char *)malloc(filename_legth * (sizeof(char)));
-    memcpy(filename, filename_start, filename_legth);
-    size_t file_size;
-    char * file_data = get_data_from_file(filename, &file_size);
-    free(filename);
+    char *route = (char *)malloc(routename_length * sizeof(char));
+    memcpy(route, c_ctx->http_req_->url_, routename_length - 1);
+    route[routename_length - 1] = '\0';
+    if (check_if_route_exists(sd->ioc_->rt_, route, c_ctx->http_req_->request_type_))
+    {
+        char *filename_start = routename_end + 1;
+        size_t filename_legth = c_ctx->http_req_->url_length_ - routename_length;
+        char *filename = (char *)malloc(filename_legth * (sizeof(char)));
+        memcpy(filename, filename_start, filename_legth);
+        get_data_from_file(filename, &file_data, &file_size);
+        free(filename);
+        snprintf(status, 50, "%s", "200 OK");
+    }
+    else
+    {
+        snprintf(status, 50, "%s", "400 Bad Request");
+    }
     char *response;
     size_t response_size = 1024 + file_size;
     response = (char *)calloc(response_size, sizeof(char));
     int cx = 0, tcx = 0;
-    tcx += snprintf (response + tcx, response_size - tcx, "HTTP/1.1 200 OK\r\n");
+    tcx += snprintf (response + tcx, response_size - tcx, "HTTP/1.1 %s\r\n", status);
     char * daytime = get_daytime();
     tcx += snprintf (response + tcx, response_size - tcx, "Date %s\r\n",  daytime);
     free(daytime);
@@ -320,9 +372,10 @@ void http_handler(struct server_context *ioc, char *ipaddr, int port)
     printf("server accepting connections on %s : %d\n", ipaddr, port);
 }
 
-struct server_context *initialize_io_context(char *ipaddr, int port)
+struct server_context *initialize_io_context(char *ipaddr, int port, struct route_table *rt)
 {
     struct server_context *ioc = (struct server_context *)calloc(1, sizeof(struct server_context));
+    ioc->rt_ = rt;
     http_handler(ioc, ipaddr, port);
     return ioc;
 }

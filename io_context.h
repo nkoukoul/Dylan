@@ -47,6 +47,7 @@ struct http_request
 {
     char *request_type_;
     char *url_;
+    size_t url_length_;
     char *protocol_;
     char *header_values[100];
     char *header_keys[100];
@@ -102,15 +103,36 @@ void http_write(struct strand *sd, struct client_context *c_ctx)
 
 void http_create_response(struct strand *sd, struct client_context *c_ctx)
 {
+    char *routename_start = c_ctx->http_req_->url_ + 1; // skip initial /
+    char *routename_end = strstr(routename_start, "/");
+    size_t routename_length = routename_end - routename_start +2;
+    char *filename_start = routename_end + 1;
+    size_t filename_legth = c_ctx->http_req_->url_length_ - routename_length;
+    char *filename = (char *)malloc(filename_legth * (sizeof(char)));
+    memcpy(filename, filename_start, filename_legth);
+    size_t file_size;
+    char * file_data = get_data_from_file(filename, &file_size);
+    free(filename);
     char *response;
-    response = (char *)calloc(1024, sizeof(char));
+    size_t response_size = 1024 + file_size;
+    response = (char *)calloc(response_size, sizeof(char));
     int cx = 0, tcx = 0;
-    tcx += snprintf (response + tcx, 1024 - tcx, "HTTP/1.1 200 OK\r\n");
+    tcx += snprintf (response + tcx, response_size - tcx, "HTTP/1.1 200 OK\r\n");
     char * daytime = get_daytime();
-    tcx += snprintf (response + tcx, 1024 - tcx, "Date %s\r\n",  daytime);
+    tcx += snprintf (response + tcx, response_size - tcx, "Date %s\r\n",  daytime);
     free(daytime);
-    tcx += snprintf (response + tcx, 1024 - tcx, "Connection: close\r\n");
+    tcx += snprintf (response + tcx, response_size - tcx, "Connection: close\r\n");
+    if (file_size)
+    {
+        tcx += snprintf (response + tcx, response_size - tcx, "Content-Type: text/html\r\n");
+        tcx += snprintf (response + tcx, response_size - tcx, "Content-Length: %lu\r\n", file_size + 2);
+    }
     tcx += snprintf (response + tcx, 1024 - tcx, "\r\n");
+    if (file_size)
+    {
+        tcx += snprintf (response + tcx, response_size - tcx, "%s\r\n", file_data);
+        free(file_data);
+    }
     c_ctx->http_res_ = (struct http_response *)calloc(1, sizeof(struct http_response));
     c_ctx->http_res_->response_ = response;
     c_ctx->http_res_->res_size_ = tcx;
@@ -158,6 +180,7 @@ void http_parse_request(struct strand *sd, struct client_context *c_ctx)
                     c_ctx->http_req_->url_ = (char *)malloc(token_length * sizeof(char));
                     memcpy(c_ctx->http_req_->url_, token_start, token_length - 1);
                     c_ctx->http_req_->url_[token_length - 1] = '\0';
+                    c_ctx->http_req_->url_length_ = token_length;
                     //printf("%s\n", c_ctx->http_req_->url_);
                     token_start = token_end + 1;
                     token_end = strstr(token_start, "\n");

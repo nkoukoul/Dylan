@@ -68,14 +68,17 @@ struct server_context
 struct client_context
 {
     int client_socket_;
-    char *data_;
+    int close_connection_;
+    int websocket_data_len_;
+    char data_[MAXBUF]; //at the moment 1024 bytes supported only
+    char websocket_data_[MAXBUF]; //at the moment 1024 bytes supported only
     struct http_request *http_req_;
     struct http_response *http_res_;
 };
 
 void clear_client_context(struct client_context * c_ctx)
 {
-    free(c_ctx->data_);
+    //free(c_ctx->data_);
     clear_http_request(c_ctx->http_req_);
     clear_http_response(c_ctx->http_res_);
     free(c_ctx);
@@ -131,12 +134,108 @@ void non_block_socket(int sd)
     }
 }
 
+void websocket_parse_request(struct strand *sd, struct client_context *c_ctx)
+{
+    int fin, rsv1, rsv2, rsv3, opcode, mask, i = 0;
+    ulong payload_len;
+    unsigned char mask_key[4];
+    uint8_t octet = (uint8_t)c_ctx->websocket_data_[i++]; //8 bit char
+    fin = (octet >> 7) & 0x01;
+    rsv1 = (octet >> 6) & 0x01;
+    rsv2 = (octet >> 5) & 0x01;
+    rsv3 = (octet >> 4) & 0x01;
+    opcode = octet & 0x0F;
+    octet = (uint8_t)c_ctx->websocket_data_[i++]; //8 bit char
+    mask = (octet >> 7) & 0x01;
+    payload_len = (octet) & 0x7F;
+    if (payload_len == 126)
+    {
+        uint16_t octet_2 = ((uint16_t)c_ctx->websocket_data_[i]) << 8 + (uint16_t)c_ctx->websocket_data_[i+1];  
+        payload_len = octet_2;
+        i += 2;
+    }
+    else if (payload_len == 127)
+    {
+        uint64_t octet_8 = ((uint64_t)c_ctx->websocket_data_[i]) << 56 
+                            + ((uint64_t)c_ctx->websocket_data_[i+1]) << 48
+                            + ((uint64_t)c_ctx->websocket_data_[i+2]) << 40
+                            + ((uint64_t)c_ctx->websocket_data_[i+3]) << 32
+                            + ((uint64_t)c_ctx->websocket_data_[i+4]) << 24
+                            + ((uint64_t)c_ctx->websocket_data_[i+5]) << 16
+                            + ((uint64_t)c_ctx->websocket_data_[i+6]) << 8
+                            + ((uint64_t)c_ctx->websocket_data_[i+7]);  
+        payload_len = octet_8;
+        i += 8;
+    }
+    if (mask == 1)
+    {        
+        mask_key[0] = c_ctx->websocket_data_[i]; 
+        mask_key[1] = c_ctx->websocket_data_[i+1];
+        mask_key[2] = c_ctx->websocket_data_[i+2];
+        mask_key[3] = c_ctx->websocket_data_[i+3];
+        i +=4;
+    }
+    char * payload = (char *)malloc((payload_len + 1) * sizeof(char));
+    memcpy(payload, c_ctx->websocket_data_ + i, payload_len);
+    memset(c_ctx->websocket_data_, 0, 1024);
+    c_ctx->websocket_data_len_ = 0;
+    for (int j = 0; j < payload_len; j++)
+    {
+        payload[j] = payload[j] ^ (mask_key[(j % 4)]);
+    }
+    payload[payload_len] = '\0';
+    printf("received %s\n", payload);
+    free(payload);
+}
+
+void websocket_read(struct strand *sd, struct client_context *c_ctx)
+{
+    char inbuffer[MAXBUF];
+    char *input_websocket_frame_in_bits;
+    // Read data from client
+    int bytes_read = read(c_ctx->client_socket_, inbuffer, MAXBUF);
+    if (bytes_read <= 0)
+    {
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+            //read block so finished reading data from client or client hasnt written a thing
+            ;
+        }
+        else
+        {
+            printf("ws client disconnected or error\n");
+            close(c_ctx->client_socket_);
+            clear_client_context(c_ctx);
+            return;
+        }
+    }
+    else
+    {
+        memcpy(c_ctx->websocket_data_ + c_ctx->websocket_data_len_, inbuffer, bytes_read);
+        c_ctx->websocket_data_len_ += bytes_read;
+        void (*func_ptr)(struct strand *, struct client_context *) = websocket_parse_request;
+        add_job(sd, c_ctx, func_ptr);    
+    }
+    //add another read job to the queue
+    void (*func_ptr)(struct strand *, struct client_context *) = websocket_read;
+    add_job(sd, c_ctx, func_ptr);
+}
+
+
 void http_write(struct strand *sd, struct client_context *c_ctx)
 {
     write(c_ctx->client_socket_, c_ctx->http_res_->response_, c_ctx->http_res_->res_size_);
-    //close socket if http
-    close(c_ctx->client_socket_);
-    clear_client_context(c_ctx);
+    if (c_ctx->close_connection_)
+    {
+        //close socket if http
+        close(c_ctx->client_socket_);
+        clear_client_context(c_ctx);
+    }
+    else // websocket
+    {
+        void (*func_ptr)(struct strand *, struct client_context *) = websocket_read;
+        add_job(sd, c_ctx, func_ptr);
+    }
 }
 
 void http_create_response(struct strand *sd, struct client_context *c_ctx)
@@ -145,26 +244,61 @@ void http_create_response(struct strand *sd, struct client_context *c_ctx)
     char * file_data = NULL;
     char status[50];
     memset(status, 0, 50);
+    char sec_websocket_key[50];
+    memset(sec_websocket_key, 0, 50);
+    int is_websocket = 0;
     char *routename_start = c_ctx->http_req_->url_ + 1; // skip initial /
     char *routename_end = strstr(routename_start, "/");
-    size_t routename_length = routename_end - routename_start +2;
-    char *route = (char *)malloc(routename_length * sizeof(char));
-    memcpy(route, c_ctx->http_req_->url_, routename_length - 1);
-    route[routename_length - 1] = '\0';
-    if (check_if_route_exists(sd->ioc_->rt_, route, c_ctx->http_req_->request_type_))
+    if (routename_end)
     {
-        char *filename_start = routename_end + 1;
-        size_t filename_legth = c_ctx->http_req_->url_length_ - routename_length;
-        char *filename = (char *)malloc(filename_legth * (sizeof(char)));
-        memcpy(filename, filename_start, filename_legth);
-        get_data_from_file(filename, &file_data, &file_size);
-        free(filename);
-        snprintf(status, 50, "%s", "200 OK");
+        size_t routename_length = routename_end - routename_start +2;
+        char *route = (char *)malloc(routename_length * sizeof(char));
+        memcpy(route, c_ctx->http_req_->url_, routename_length - 1);
+        route[routename_length - 1] = '\0';
+        if (check_if_route_exists(sd->ioc_->rt_, route, c_ctx->http_req_->request_type_))
+        {
+            // check for websocket request
+            int con_index = hash("Connection") % 100;
+            int upg_index = hash("Upgrade") % 100;
+            if (c_ctx->http_req_->header_keys[con_index] && strcmp(c_ctx->http_req_->header_values[con_index], "Upgrade") == 0 && 
+                c_ctx->http_req_->header_keys[upg_index] && strcmp(c_ctx->http_req_->header_values[upg_index], "websocket") == 0)
+            {
+                int key_index = hash("Sec-WebSocket-Key") % 100;
+                char * key = c_ctx->http_req_->header_values[key_index];
+                int key_len = 0;
+                char c;
+                while (c = *key++)
+                {
+                    key_len++;
+                }
+                int output_key_len = 0;
+                char *encoded_key = generate_ws_key(c_ctx->http_req_->header_values[key_index],
+                                                    key_len, &output_key_len);
+                snprintf(sec_websocket_key, 50, "%s", encoded_key);
+                free(encoded_key);
+                is_websocket = 1;
+                snprintf(status, 50, "%s", "101 Switching Protocols");
+            }
+            else
+            {
+                char *filename_start = routename_end + 1;
+                size_t filename_legth = c_ctx->http_req_->url_length_ - routename_length;
+                char *filename = (char *)malloc(filename_legth * (sizeof(char)));
+                memcpy(filename, filename_start, filename_legth);
+                get_data_from_file(filename, &file_data, &file_size);
+                free(filename);
+                snprintf(status, 50, "%s", "200 OK");
+            }
+        }
+        else
+        {
+        snprintf(status, 50, "%s", "400 Bad Request");
+        }
     }
     else
     {
         snprintf(status, 50, "%s", "400 Bad Request");
-    }
+    }   
     char *response;
     size_t response_size = 1024 + file_size;
     response = (char *)calloc(response_size, sizeof(char));
@@ -173,7 +307,16 @@ void http_create_response(struct strand *sd, struct client_context *c_ctx)
     char * daytime = get_daytime();
     tcx += snprintf (response + tcx, response_size - tcx, "Date %s\r\n",  daytime);
     free(daytime);
-    tcx += snprintf (response + tcx, response_size - tcx, "Connection: close\r\n");
+    if (is_websocket){
+        tcx += snprintf (response + tcx, response_size - tcx, "Upgrade: websocket\r\n");
+        tcx += snprintf (response + tcx, response_size - tcx, "Connection: Upgrade\r\n");
+        tcx += snprintf (response + tcx, response_size - tcx, "Sec-WebSocket-Accept: %s\r\n", sec_websocket_key);
+        c_ctx->close_connection_ = 0;
+    }
+    else{
+        tcx += snprintf (response + tcx, response_size - tcx, "Connection: close\r\n");
+        c_ctx->close_connection_ = 1;
+    }
     if (file_size)
     {
         tcx += snprintf (response + tcx, response_size - tcx, "Content-Type: text/html\r\n");
@@ -312,9 +455,7 @@ void http_read(struct strand *sd, struct client_context *c_ctx)
     }
     else
     {
-        //printf("read bytes %d\n", bytes_read);
-        //printf("%s", inbuffer);
-        c_ctx->data_ = (char *)malloc(bytes_read * sizeof(char));
+        //c_ctx->data_ = (char *)malloc(bytes_read * sizeof(char));
         memcpy(c_ctx->data_, inbuffer, bytes_read);
         void (*func_ptr)(struct strand *, struct client_context *) = http_parse_request;
         add_job(sd, c_ctx, func_ptr);

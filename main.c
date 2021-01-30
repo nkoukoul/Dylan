@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include "strand.h"
 #include "io_context.h"
+#include "route.h"
 
 pthread_mutex_t event_lock;
 
@@ -17,7 +18,7 @@ void *executor(void *thread_info)
 {
     struct thread_info *tf = (struct thread_info *)thread_info;
     int thread_id = tf->thread_num_;
-    void (*func_ptr)(struct strand *, struct client_context *) = handle_connections;
+    void (*func_ptr)(struct strand *, struct client_context *) = accept_connections;
     add_job(tf->sd_, NULL, func_ptr);
     while (1)
     {

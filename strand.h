@@ -4,33 +4,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdio.h>
-
-struct strand;
-struct client_context;
-
-struct job
-{
-    struct job *next_;
-    void (*func_ptr_)(struct strand *, struct client_context *);
-    struct client_context *c_ctx_;
-    int job_id_;
-};
-
-void clear_job(struct job* jb)
-{
-    jb->next_ = NULL;
-    jb->c_ctx_ = NULL;//client context will be free when request is complete
-    free(jb);
-}
-
-struct strand
-{
-    struct job *cursor_;
-    pthread_mutex_t strand_lock_;
-    int size_;
-    int job_id_;
-    struct server_context *ioc_;
-};
+#include "objects.h"
 
 pthread_mutex_t initialize_lock()
 {

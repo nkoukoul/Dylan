@@ -29,19 +29,20 @@ char *get_daytime()
   return buffer;
 }
 
-void get_data_from_file(char *filename, char **data, size_t *file_size)
+char * get_data_from_file(char *filename, size_t *file_size)
 {
   int fd = open(filename, O_RDONLY);
   if (fd < 0)
   {
     *file_size = 0;
     //printf("unable to open %s\n", filename);
-    return;
+    return NULL;
   }
   *file_size = lseek(fd, 0, SEEK_END);
-  *data = (char *)malloc((*file_size) * sizeof(char));
-  pread(fd, *data, *file_size, 0);
+  char *data = (char *)malloc((*file_size) * sizeof(char));
+  pread(fd, data, *file_size, 0);
   close(fd);
+  return data;
   //printf("file to open %s with size %lu\n", filename, *file_size);
 }
 
@@ -110,6 +111,7 @@ char * generate_ws_key(char *ws_client_key, int key_length, int *output_key_leng
   printf("concatenated_key %s\n", concatenated_string);
   unsigned char hash[SHA_DIGEST_LENGTH];
   SHA1((unsigned char *)concatenated_string, concatenated_string_length - 1, hash);
+  free(concatenated_string);
   return base_64_encode(hash, SHA_DIGEST_LENGTH, output_key_length);
 }
 

@@ -58,7 +58,7 @@ void http_create_response(struct strand *sd, struct client_context *c_ctx)
                 size_t filename_legth = c_ctx->http_req_->url_length_ - routename_length;
                 char *filename = (char *)malloc(filename_legth * (sizeof(char)));
                 memcpy(filename, filename_start, filename_legth);
-                get_data_from_file(filename, &file_data, &file_size);
+                file_data = get_data_from_file(filename, &file_size);
                 if (file_size)
                 {
                     snprintf(status, 50, "%s", "200 OK");
@@ -105,7 +105,7 @@ void http_create_response(struct strand *sd, struct client_context *c_ctx)
         tcx += snprintf (response + tcx, response_size - tcx, "Content-Type: text/html\r\n");
         tcx += snprintf (response + tcx, response_size - tcx, "Content-Length: %lu\r\n", file_size + 2);
     }
-    tcx += snprintf (response + tcx, 1024 - tcx, "\r\n");
+    tcx += snprintf (response + tcx, response_size - tcx, "\r\n");
     if (file_size)
     {
         tcx += snprintf (response + tcx, response_size - tcx, "%s\r\n", file_data);

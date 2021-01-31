@@ -23,7 +23,7 @@ void websocket_create_response(struct strand *sd, struct client_context *c_ctx)
     }
     else if (c_ctx->websocket_message_len_ > 125)
     {
-        payload_len = 127;
+        payload_len = 126;
     }
     
     response[index++] = (payload_len) & 0x7F;
